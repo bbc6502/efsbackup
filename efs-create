@@ -1,0 +1,32 @@
+#!/bin/bash
+# Create a luks encrypted filesystem
+# Copyright (C) 2021 David (@bbc6502)
+
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
+WHOAMI=$(whoami)
+if [[ ${WHOAMI} != "root" ]] ; then
+  sudo efs-create "$@"
+  exit $?
+fi
+
+PROGNAME=$(basename ${0})
+
+DEVICE=${1:-sdb1}
+DEVICE_PATH=/dev/${DEVICE}
+
+OK=$(lsblk -l ${DEVICE_PATH} | egrep 'part *$')
+RC=$?
+if [[ $RC -eq 0 ]] ; then
+  echo "Create luks encrypted filesystem on ${DEVICE_PATH}"
+  cryptsetup --verbose --verify-passphrase luksFormat ${DEVICE_PATH}
+  echo "Open ${DEVICE_PATH}"
+  cryptsetup luksOpen ${DEVICE_PATH} ${DEVICE}
+  echo "Create btrfs encrypted filesystem"
+  mkfs.btrfs /dev/mapper/${DEVICE}
+  sleep 1
+  echo "Close ${DEVICE_PATH}"
+  cryptsetup luksClose ${DEVICE}
+  echo "Finished creating luks encrypted filesystem on ${DEVICE_PATH}"
+fi
+

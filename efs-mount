@@ -1,0 +1,55 @@
+#!/bin/bash
+# Mount a luks encrypted filesystem
+# Inspired by information at http://www.mikerubel.org/computers/rsync_snapshots/
+# Copyright (C) 2021 David (@bbc6502)
+
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
+WHOAMI=$(whoami)
+if [[ ${WHOAMI} != "root" ]] ; then
+  sudo efs-mount "$@"
+  exit $?
+fi
+
+PROGNAME=$(basename ${0})
+
+DEVICE=${1:-sdb1}
+
+if [[ ! -b /dev/${DEVICE} ]] ; then
+  echo "CANNOT FIND BLOCK DEVICE /dev/${DEVICE}"
+  echo "Make sure the device is connected and you have the correct device."
+  echo "Syntax: ${PROGNAME} <device-name>"
+  exit 1
+fi
+
+MOUNT=/mnt/${DEVICE}
+
+# Open the luks encrypted device
+if [[ ! -b /dev/mapper/${DEVICE} ]] ; then
+  echo "Open the encrypted device ${DEVICE}"
+  /usr/sbin/cryptsetup luksOpen /dev/${DEVICE} ${DEVICE}
+else
+  echo "Already opened encrypted device ${DEVICE}"
+fi
+if [[ ! -b /dev/mapper/${DEVICE} ]] ; then
+  echo "FAILED TO OPEN THE ENCRYPTED DEVICE ${DEVICE}"
+  exit 1
+fi
+
+# Mount the encrypted filesystem
+mount | grep -q /dev/mapper/${DEVICE}
+if [[ $? -ne 0 ]] ; then
+  echo "Mount the encrypted filesystem at ${MOUNT}"
+  /usr/bin/mkdir -p ${MOUNT}
+  /usr/bin/mount /dev/mapper/${DEVICE} ${MOUNT}
+else
+  echo "Already mounted /dev/mapper/${DEVICE}"
+fi
+mount | grep -q /dev/mapper/${DEVICE}
+if [[ $? -ne 0 ]] ; then
+  echo "FAILED TO MOUNT THE ENCRYPTED FILESYSTEM"
+  exit 1
+fi
+
+exit 0
+

@@ -1,0 +1,108 @@
+#!/bin/bash
+# Incremental backup to a luks encrypted filesystem
+# Inspired by information at http://www.mikerubel.org/computers/rsync_snapshots/
+# Copyright (C) 2021 David (@bbc6502)
+
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
+WHOAMI=$(whoami)
+if [[ ${WHOAMI} != "root" ]] ; then
+  sudo efs-backup "$@"
+  exit $?
+fi
+
+echo ""
+echo "==================="
+echo "BACKUP TO EFS DRIVE"
+echo "==================="
+echo ""
+
+AVAILABLE=$(free --kilo | grep Mem | awk '{print $7}')
+AVAILABLE=$((AVAILABLE / 2))
+echo "Limit to ${AVAILABLE} kilobytes RAM"
+ulimit -m ${AVAILABLE}
+ulimit -v ${AVAILABLE}
+
+PROGNAME=$(basename ${0})
+
+DEVICE=${1:-sdb1}
+
+if [[ ! -b /dev/${DEVICE} ]] ; then
+  echo "CANNOT FIND BLOCK DEVICE /dev/${DEVICE}"
+  echo "Make sure the device is connected and you have the correct device."
+  echo "Syntax: ${PROGNAME} <device-name>"
+  exit 1
+fi
+
+HOSTNAME=$(/usr/bin/hostname -s)
+
+MOUNT=/mnt/${DEVICE}
+mount | grep -q ${MOUNT}
+if [[ $? -ne 0 ]] ; then
+  echo ""
+  echo "${MOUNT} IS NOT MOUNTED. CONSIDER USING efs-mount FIRST."
+  echo ""
+  exit 1
+fi
+
+TARGET=${MOUNT}/backup/${HOSTNAME}
+
+LINKFILE=${TARGET}/latest
+if [[ -h ${LINKFILE} ]] ; then
+	LASTRUN=$(/usr/bin/readlink ${LINKFILE})
+else
+	LASTRUN="0"
+fi
+
+# calculate the next run folder
+echo ""
+echo "Last successful run was ${LASTRUN}"
+echo ""
+NEXTRUN=$(((${LASTRUN}+1)%10))
+TARGETDIR=${TARGET}/${NEXTRUN}
+
+# use the previous backup for hardlinks
+if [[ -h ${LINKFILE} ]] ; then
+  OPTS="--link-dest=${LINKFILE}"
+else
+  OPTS=""
+fi
+
+echo ""
+echo "Will backup / to ${TARGETDIR}"
+echo ""
+echo "Backup will commence in 15 seconds. Ctrl-C to abort"
+sleep 15
+echo ""
+echo "Backup / to ${TARGETDIR}"
+echo ""
+
+# perform a full backup of changes on the local filesystem
+STATUS='SUCCESS'
+mkdir -p ${TARGETDIR}
+touch ${TARGETDIR}
+rsync -aAXS --stats --delete --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found","/var/log/*","/var/tmp/*","/var/lock","/var/lib/docker/*"} $OPTS / ${TARGETDIR}
+if [[ $? -ne 0 ]] ; then
+  echo ""
+  echo "BACKUP DID NOT COMPLETE SUCCESSFULLY"
+  echo ""
+  STATUS='FAILURE'
+fi
+
+# if the backup succeeded then relink the latest backup
+if [[ ${STATUS} == "SUCCESS" ]] ; then
+  if [[ -h ${LINKFILE} ]] ; then
+    rm -f ${LINKFILE}
+  fi
+  ln -s ${NEXTRUN} ${LINKFILE}
+fi
+
+echo ""
+echo "Backup completed with ${STATUS}"
+echo ""
+if [[ ${STATUS} == "SUCCESS" ]] ; then
+  exit 0
+else
+  exit 1
+fi
+

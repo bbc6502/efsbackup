@@ -1,0 +1,47 @@
+#!/bin/bash
+# Unmount a luks encrypted filesystem
+# Inspired by information at http://www.mikerubel.org/computers/rsync_snapshots/
+# Copyright (C) 2021 David (@bbc6502)
+
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
+WHOAMI=$(whoami)
+if [[ ${WHOAMI} != "root" ]] ; then
+  sudo efs-umount "$@"
+  exit $?
+fi
+
+PROGNAME=$(basename ${0})
+
+DEVICE=${1:-sdb1}
+
+if [[ ! -b /dev/${DEVICE} ]] ; then
+  echo "CANNOT FIND BLOCK DEVICE /dev/${DEVICE}"
+  echo "Make sure the device is connected and you have the correct device."
+  echo "Syntax: ${PROGNAME} <device-name>"
+  exit 1
+fi
+
+MOUNT=/mnt/${DEVICE}
+
+UNMOUNT='NO'
+if [[ -d ${MOUNT} ]] ; then
+  echo "Unmounting the encrypted filesystem at ${MOUNT}"
+  /usr/bin/umount ${MOUNT}
+  /usr/bin/rmdir ${MOUNT}
+  UNMOUNT='YES'
+fi
+
+if [[ -b /dev/mapper/${DEVICE} ]] ; then
+  echo "Closing the encrypted device ${DEVICE}"
+  /usr/sbin/cryptsetup luksClose ${DEVICE}
+  UNMOUNT='YES'
+fi
+
+if [[ $UNMOUNT == 'YES' ]] ; then
+  eject /dev/${DEVICE}
+  hdparm -y /dev/${DEVICE%?}
+fi
+
+exit 0
+
